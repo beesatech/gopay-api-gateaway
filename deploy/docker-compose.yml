@@ -1,0 +1,48 @@
+# Standalone GoPay Merchant gateway — its own app, independent of any consumer.
+# One GoBiz session per instance (one GoPay merchant account).
+#
+# Any application reaches it two ways:
+#   - internally, on the shared `gopay-net` docker network, at http://${STACK:-gopay}_gateway:3000
+#   - publicly, via Traefik at https://${DOMAIN}
+# Both require the x-api-key header set to API_KEY.
+#
+# Setup:
+#   docker network create gopay-net        # once (shared with consumers)
+#   cp deploy/.env.example deploy/.env && edit   # set API_KEY, DOMAIN
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#   docker compose -f deploy/docker-compose.yml exec gopay node login.js   # one-time OTP login
+
+services:
+  gopay:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: ${STACK:-gopay}_gateway
+    restart: always
+    env_file: [.env]          # API_KEY, QRIS_STATIC, GOPAY_MERCHANT_ID
+    environment:
+      PORT: 3000
+      TZ: ${TZ:-Asia/Jakarta}
+    volumes:
+      - gopay_session:/session   # GoBiz session — back this up
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-proxy}"
+      - "traefik.http.routers.gopay-gw.rule=Host(`${DOMAIN:-gopay.beesatech.com}`)"
+      - "traefik.http.routers.gopay-gw.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.gopay-gw.tls=true"
+      - "traefik.http.routers.gopay-gw.tls.certresolver=${TRAEFIK_CERTRESOLVER:-cloudflare}"
+      - "traefik.http.services.gopay-gw.loadbalancer.server.port=3000"
+    networks: [proxy, gopay-net]
+
+networks:
+  proxy:
+    name: ${TRAEFIK_NETWORK:-proxy}
+    external: true
+  gopay-net:
+    name: ${GOPAY_NETWORK:-gopay-net}
+    external: true
+
+volumes:
+  gopay_session:
+    name: ${SESSION_VOLUME:-gopay_session}
